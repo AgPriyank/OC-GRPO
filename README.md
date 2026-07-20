@@ -30,6 +30,34 @@ baseline.py                 Eval engine + answer grading used by reward and eval
 docs/REPRODUCING.md         Full run matrix, data pipeline, eval protocol
 ```
 
+## Quick start
+
+```bash
+# 0. clone (the --recurse-submodules flag matters: it pulls our verl fork)
+git clone --recurse-submodules https://github.com/AgPriyank/oc-grpo.git
+cd oc-grpo
+
+# 1. environment (Linux, CUDA 12.4, A100-40GB tested)
+conda create -n oc-grpo python=3.10 -y
+conda activate oc-grpo
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+pip install flash-attn --no-build-isolation
+pip install -r requirements.txt
+
+# 2. patched verl (submodule is already pinned to branch custom-patches-v0.4.1)
+cd verl && git apply ../verl_uncommitted.patch && pip install --no-deps -e . && cd ..
+
+# 3. train OC-GRPO-Fixed on the paper's exact 7B training data (4x A100-40GB)
+bash scripts/run_training.sh verl_run_901_masked_IS_n16
+```
+
+That's it — **the training data ships in this repo** (`verl_grpo/data_*/`, the
+exact parquets behind the paper's runs), so step 3 works immediately after
+install; no data preparation, no downloads beyond the base model from
+HuggingFace. Checkpoints appear under
+`runs/verl_grpo_run901_masked_IS_n16/global_step_<N>/actor/lora_adapter/`
+at every epoch boundary (steps 30/60/90/120 for this run).
+
 ## Paper method → run config mapping
 
 Main results (Tables 2–4). All runs: LoRA (r=64, α=128, dropout 0.05), AdamW
@@ -57,30 +85,29 @@ Hint-cascade experiments (Table 5, 7B, 3 seeds at n=8 rollouts — see
 | OC-GRPO (Self-Correction) | `verl_run_854` | online hints, L1 only (blind feedback on failed attempts) + IS |
 | OC-GRPO-Adaptive (Frontier Hints) | `verl_run_858` | online hints L1–L5 from Claude Sonnet (needs `ANTHROPIC_API_KEY`) + IS |
 
-## Installation
+## Installation details
 
-Tested on Linux, Python 3.10, CUDA 12.4, NVIDIA A100-40GB.
+Tested configuration: Linux, Python 3.10, CUDA 12.4, NVIDIA A100-40GB.
+Pinned versions in `requirements.txt` are the exact ones used for the paper.
+
+Install order matters:
+
+1. **torch 2.6.0 (cu124)** first — `flash-attn` compiles against it.
+2. **flash-attn** with `--no-build-isolation`.
+3. **`requirements.txt`** — vllm 0.8.5.post1, transformers 4.57.6,
+   ray 2.53.0, hydra 1.3.2, etc. (torch stays untouched: the vllm pin is
+   satisfied by the cu124 build).
+4. **The patched verl fork**, editable, `--no-deps`:
 
 ```bash
-git clone --recurse-submodules https://github.com/<you>/oc-grpo.git
-cd oc-grpo
-
-conda create -n oc-grpo python=3.10 -y
-conda activate oc-grpo
-
-# 1. torch first (cu124 build), then flash-attn against it
-pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
-pip install flash-attn --no-build-isolation
-
-# 2. everything else (exact paper versions pinned)
-pip install -r requirements.txt
-
-# 3. the patched verl fork (submodule pins branch custom-patches-v0.4.1)
 cd verl
 git apply ../verl_uncommitted.patch   # adds enable_thinking chat-template compat
 pip install --no-deps -e .
 cd ..
 ```
+
+If you cloned without `--recurse-submodules`, run
+`git submodule update --init` first.
 
 **About the verl patches.** The `verl/` submodule points to
 [our fork](https://github.com/AgPriyank/verl) of veRL, branch
@@ -95,34 +122,45 @@ work: the trainer imports `verl.trainer.constants_ppo` and
 
 ## Training
 
-Run from the repo root (all paths are CWD-relative):
+Run from the repo root (all paths are CWD-relative). One command per paper
+run — the launcher reads the config, finds its shipped training parquet,
+computes the epoch length, and starts training:
 
 ```bash
-# OC-GRPO-Fixed, 7B (4x A100-40GB)
-bash scripts/run_training.sh verl_run_901_masked_IS_n16
+bash scripts/run_training.sh <CONFIG_NAME> [extra hydra overrides...]
+```
 
-# OC-GRPO-Adaptive, 7B (4x A100-40GB)
-bash scripts/run_training.sh verl_run_852_n16
+| Run | Command | GPUs |
+|---|---|---|
+| OC-GRPO-Fixed, 7B | `bash scripts/run_training.sh verl_run_901_masked_IS_n16` | 4× A100-40GB |
+| OC-GRPO-Adaptive, 7B | `bash scripts/run_training.sh verl_run_852_n16` | 4× A100-40GB |
+| Vanilla GRPO, 7B | `bash scripts/run_training.sh verl_run_652_n16` | 4× A100-40GB |
+| POPE\* / PrefixRL\* / BREAD\*, 7B | `verl_run_901_n16` / `verl_run_901_prefixrl_n16` / `verl_run_852_non_masked_n16` | 4× A100-40GB |
+| Any 3B run | e.g. `bash scripts/run_training.sh verl_run_951_n16` | 2× A100-40GB |
+| Any 1.5B run | e.g. `bash scripts/run_training.sh verl_run_1506_masked_IS_n16` | 2× A100-40GB |
+| Seed variants (7B) | append `_s2` (seed 123) or `_s3` (seed 456), e.g. `verl_run_852_n16_s2` | 4× A100-40GB |
+| Hint-cascade runs (Table 5) | `verl_run_900_masked_IS`, `verl_run_853`, `verl_run_854`, `verl_run_858` | 4× A100-40GB |
 
-# Any 3B / 1.5B run (2x A100-40GB)
-bash scripts/run_training.sh verl_run_951_n16
-bash scripts/run_training.sh verl_run_1506_masked_IS_n16
+Useful overrides:
 
-# Seed variants
-bash scripts/run_training.sh verl_run_852_n16_s2   # seed 123
-bash scripts/run_training.sh verl_run_852_n16_s3   # seed 456
-
-# Optional wandb logging
+```bash
+# wandb logging (needs WANDB_API_KEY)
 bash scripts/run_training.sh verl_run_852_n16 trainer.logger='[console,wandb]'
 ```
 
 On SLURM: `CONFIG_NAME=verl_run_852_n16 sbatch jobs/train_4gpu.sbatch`
-(edit the `#SBATCH` headers for your cluster; 3B/1.5B use `jobs/train_2gpu.sbatch`).
+(edit the `#SBATCH` headers for your cluster; 3B/1.5B runs use
+`jobs/train_2gpu.sbatch`). Wall-clock: roughly 3–13 h for 1.5B/3B runs and
+up to 1–2 days for 7B runs on the listed GPUs (we used 24 h / 48 h SLURM
+walltimes for 2-GPU / 4-GPU jobs).
 
-Checkpoints are saved at every epoch boundary to
-`runs/<experiment_name>/global_step_<N>/actor/lora_adapter/`. The training
-data shipped in `verl_grpo/data_*/` is the exact data used in the paper, so no
-data preparation is needed to launch these runs.
+Each run trains 4 epochs and saves a LoRA checkpoint at every epoch boundary
+to `runs/<experiment_name>/global_step_<N>/actor/lora_adapter/` — see
+[docs/REPRODUCING.md](docs/REPRODUCING.md) for the step numbers per run.
+The parquets in `verl_grpo/data_*/` are the exact training data used in the
+paper; `data/*.json` are the raw problem sets they were built from, and
+`scripts/prepare_data.py` regenerates the base parquets from them if you want
+to rebuild (see README section below).
 
 ## Evaluation
 
