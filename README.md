@@ -34,8 +34,8 @@ docs/REPRODUCING.md         Full run matrix, data pipeline, eval protocol
 
 ```bash
 # 0. clone (the --recurse-submodules flag matters: it pulls our verl fork)
-git clone --recurse-submodules https://github.com/AgPriyank/oc-grpo.git
-cd oc-grpo
+git clone --recurse-submodules https://github.com/AgPriyank/OC-GRPO.git
+cd OC-GRPO
 
 # 1. environment (Linux, CUDA 12.4, A100-40GB tested)
 conda create -n oc-grpo python=3.10 -y
