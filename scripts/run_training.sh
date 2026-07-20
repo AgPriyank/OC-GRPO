@@ -25,12 +25,18 @@ if [ ! -f "verl_grpo/config/${CONFIG_NAME}.yaml" ]; then
   exit 1
 fi
 
+PYTHON=$(command -v python || command -v python3)
+if [ -z "${PYTHON}" ]; then
+  echo "ERROR: no python interpreter on PATH (activate the oc-grpo conda env)."
+  exit 1
+fi
+
 export TOKENIZERS_PARALLELISM=false
 export NCCL_DEBUG=WARN
 
 # Resolve train parquet + batch size from the run config (falling back to its
 # hydra defaults chain), then compute steps per epoch for save/test frequency.
-read -r TRAIN_PARQUET BATCH_SIZE <<< "$(python - "${CONFIG_NAME}" <<'EOF'
+read -r TRAIN_PARQUET BATCH_SIZE <<< "$("${PYTHON}" - "${CONFIG_NAME}" <<'EOF'
 import os, sys, yaml
 
 cfg_dir = "verl_grpo/config"
@@ -61,13 +67,17 @@ print(train_files, batch)
 EOF
 )"
 
+if [ -z "${TRAIN_PARQUET}" ]; then
+  echo "ERROR: could not resolve data.train_files for ${CONFIG_NAME} (is pyyaml installed?)."
+  exit 1
+fi
 if [ ! -f "${TRAIN_PARQUET}" ]; then
   echo "ERROR: training data not found: ${TRAIN_PARQUET}"
   echo "See docs/REPRODUCING.md ('Training data') for how to (re)build it."
   exit 1
 fi
 
-N_TRAIN=$(python -c "import pandas as pd; print(len(pd.read_parquet('${TRAIN_PARQUET}')))")
+N_TRAIN=$("${PYTHON}" -c "import pandas as pd; print(len(pd.read_parquet('${TRAIN_PARQUET}')))")
 STEPS_PER_EPOCH=$((N_TRAIN / BATCH_SIZE))
 SAVE_FREQ=${SAVE_FREQ:-${STEPS_PER_EPOCH}}
 
@@ -77,7 +87,7 @@ echo "Batch size:       ${BATCH_SIZE}"
 echo "Steps per epoch:  ${STEPS_PER_EPOCH}"
 echo "Save/test freq:   ${SAVE_FREQ}"
 
-python -m verl_grpo.main_ppo \
+"${PYTHON}" -m verl_grpo.main_ppo \
     --config-name="${CONFIG_NAME}" \
     trainer.nnodes=1 \
     trainer.save_freq="${SAVE_FREQ}" \

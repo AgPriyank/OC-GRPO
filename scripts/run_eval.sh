@@ -55,9 +55,15 @@ if [ ! -d "${LORA_PATH}" ]; then
   exit 1
 fi
 
+PYTHON=$(command -v python || command -v python3)
+if [ -z "${PYTHON}" ]; then
+  echo "ERROR: no python interpreter on PATH (activate the oc-grpo conda env)."
+  exit 1
+fi
+
 mkdir -p models/merged_models "${OUTPUT_DIR}"
 
-python evaluate_trained.py \
+"${PYTHON}" evaluate_trained.py \
   --lora_path "${LORA_PATH}" \
   --dataset math \
   --problems_file "${PROBLEMS_FILE}" \
