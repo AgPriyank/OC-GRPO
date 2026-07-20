@@ -1,0 +1,50 @@
+diff --git a/verl/utils/dataset/rl_dataset.py b/verl/utils/dataset/rl_dataset.py
+index 568b1403..9ed7029c 100644
+--- a/verl/utils/dataset/rl_dataset.py
++++ b/verl/utils/dataset/rl_dataset.py
+@@ -34,6 +34,16 @@ from verl.utils.model import compute_position_id_with_mask
+ logger = logging.getLogger(__name__)
+ 
+ 
++def _apply_chat_template_compat(tokenizer, messages, enable_thinking=None, **kwargs):
++    """Apply chat template, safely forwarding enable_thinking when supported (Qwen3+)."""
++    if enable_thinking is not None:
++        try:
++            return tokenizer.apply_chat_template(messages, enable_thinking=enable_thinking, **kwargs)
++        except TypeError:
++            return tokenizer.apply_chat_template(messages, **kwargs)
++    return tokenizer.apply_chat_template(messages, **kwargs)
++
++
+ def collate_fn(data_list: list[dict]) -> dict:
+     """
+     Collate a batch of sample dicts into batched tensors and arrays.
+@@ -114,6 +124,7 @@ class RLHFDataset(Dataset):
+         self.chat_template_func = config.get("chat_template_func", None)
+         self.need_tools_kwargs = config.get("need_tools_kwargs", False)
+         self.filter_prompts = config.get("filter_prompts", True)
++        self.enable_thinking = config.get("enable_thinking", None)
+         self.serialize_dataset = False
+         self.processor_type = self.processor.image_processor.__class__.__name__ if self.processor is not None else None
+         if self.processor_type == "MiniCPMVImageProcessor":
+@@ -161,9 +172,10 @@ class RLHFDataset(Dataset):
+                     return len(processor(text=[raw_prompt], images=images, videos=videos)["input_ids"][0])
+ 
+             else:
++                enable_thinking = self.enable_thinking
+ 
+                 def doc2len(doc) -> int:
+-                    return len(tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True))
++                    return len(_apply_chat_template_compat(tokenizer, doc[prompt_key], enable_thinking=enable_thinking, add_generation_prompt=True))
+ 
+             self.dataframe = self.dataframe.filter(
+                 lambda doc: doc2len(doc) <= self.max_prompt_length,
+@@ -254,7 +266,7 @@ class RLHFDataset(Dataset):
+             row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
+ 
+         else:
+-            raw_prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
++            raw_prompt = _apply_chat_template_compat(self.tokenizer, messages, enable_thinking=self.enable_thinking, add_generation_prompt=True, tokenize=False)
+             model_inputs = self.tokenizer(raw_prompt, return_tensors="pt", add_special_tokens=False)
+             input_ids = model_inputs.pop("input_ids")
+             attention_mask = model_inputs.pop("attention_mask")

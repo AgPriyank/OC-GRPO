@@ -1,0 +1,51 @@
+# ============================================================================
+# Run 901_n16: Offline Augmented Prefix Training, n=16 rollout
+# ============================================================================
+# Parent: run 901 (offline prefix, n=8, 4-GPU TP=1)
+# Change: n=8 -> n=16, TP=1 -> TP=2
+# No batch size changes (if OOM, adjust later)
+#
+# Model:    Qwen2.5-7B-Instruct + LoRA (rank=64, alpha=128)
+# Dataset:  Offline augmented ExtremeHard 595 with prefix fraction cascade
+#           ~536 original rows + ~460-510 guided rows = ~1000-1050 train rows
+# GPUs:     4x A100 40GB (FSDP + vLLM TP=2)
+# Epochs:   4
+# Hints:    DISABLED — prompts are pre-baked into the parquet offline
+#
+# Batch math:
+#   train_batch_size=32, n=16 -> 512 sequences/step
+#   steps_per_epoch = N_TRAIN / 32 (computed from parquet at submit time)
+# ============================================================================
+
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run901_n16
+  total_epochs: 4
+  n_gpus_per_node: 4
+
+data:
+  train_files: verl_grpo/data_offline_guided_prefix/train.parquet
+  val_files: verl_grpo/data_offline_guided_prefix/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 4096
+
+actor_rollout_ref:
+  model:
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    n: 16
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 16
+
+hints:
+  enabled: false

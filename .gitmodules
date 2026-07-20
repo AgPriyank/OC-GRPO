@@ -1,0 +1,4 @@
+[submodule "verl"]
+	path = verl
+	url = https://github.com/AgPriyank/verl.git
+	branch = custom-patches-v0.4.1

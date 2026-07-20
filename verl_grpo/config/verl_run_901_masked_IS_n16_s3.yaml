@@ -1,0 +1,42 @@
+# Seed variant: seed=456
+# Parent: 901_masked_IS_n16 (Qwen 7B n=16 rollout)
+
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run901_masked_IS_n16_s3
+  seed: 456
+  total_epochs: 4
+  n_gpus_per_node: 4
+
+data:
+  train_files: verl_grpo/data_offline_guided_prefix/train.parquet
+  val_files: verl_grpo/data_offline_guided_prefix/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 4096
+
+actor_rollout_ref:
+  model:
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    n: 16
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 16
+    seed: 456
+
+hints:
+  enabled: true
+  hint_mode: prompt_masked
+  prompt_mode: original
+  compute_is_ratio: true
+  is_correction_mode: per_token
+  is_correction_clamp_min: 0.01

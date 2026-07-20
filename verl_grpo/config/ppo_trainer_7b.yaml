@@ -1,0 +1,418 @@
+# verl_grpo config: Qwen2.5-7B-Instruct + LoRA + GRPO
+# Based on ppo_trainer.yaml with 7B-specific infrastructure overrides.
+#
+# Changes from ppo_trainer.yaml (3B defaults):
+#   - model.path: Qwen2.5-7B-Instruct (was 3B)
+#   - use_remove_padding: true (Qwen sequence packing, ~2x faster)
+#   - ppo_mini_batch_size: 32 (was 16, larger mini-batch for stable gradients)
+#   - ppo_micro_batch_size_per_gpu: 4 (was 8, conservative for 7B memory)
+#   - entropy_from_logits_with_chunking: true (7B has larger logits)
+#   - param_offload/optimizer_offload: true (7B needs on 40GB GPUs)
+#   - load_format: safetensors (required for LoRA vLLM sync)
+#   - layered_summon: true (layer-by-layer LoRA sync for 7B)
+#   - enable_chunked_prefill: false (conflicts with LoRA in vLLM)
+#   - max_model_len: 5000, max_num_batched_tokens: 5000, max_num_seqs: 256 (7B memory)
+
+data:
+  tokenizer: null
+  use_shm: False
+  train_files: verl_grpo/data/train.parquet
+  val_files: verl_grpo/data/val.parquet
+  prompt_key: prompt
+  reward_fn_key: data_source
+  max_prompt_length: 2048
+  max_response_length: 1200
+  train_batch_size: 32
+  val_batch_size: null
+  return_raw_input_ids: False
+  return_raw_chat: False
+  return_full_prompt: False
+  shuffle: True
+  validation_shuffle: False
+  filter_overlong_prompts: True
+  filter_overlong_prompts_workers: 1
+  truncation: error
+  image_key: images
+  video_key: videos
+  trust_remote_code: False
+  enable_thinking: null  # Set to false for Qwen3+ to disable thinking mode
+  custom_cls:
+    path: null
+    name: null
+  sampler: null
+  seed: 42
+
+actor_rollout_ref:
+  hybrid_engine: true
+
+  model:
+    path: Qwen/Qwen2.5-7B-Instruct          # 7B model (was 3B)
+    custom_chat_template: null
+    use_shm: false
+    external_lib: null
+    override_config: {}
+    enable_gradient_checkpointing: true
+    enable_activation_offload: false
+    use_remove_padding: true                  # 7B: Qwen sequence packing (~2x faster)
+    lora_rank: 64
+    lora_alpha: 128
+    target_modules: all-linear
+    lora_dropout: 0.0                         # Per-run configs override (e.g. 0.05)
+    use_liger: false
+    use_fused_kernels: false
+    fused_kernel_options:
+      impl_backend: torch
+    trust_remote_code: false
+
+  actor:
+    strategy: fsdp
+    ppo_mini_batch_size: 32                   # 7B: larger mini-batch for stable gradients (was 16)
+    ppo_micro_batch_size: null
+    ppo_micro_batch_size_per_gpu: 4           # 7B: conservative for memory (was 8)
+    use_dynamic_bsz: false
+    ppo_max_token_len_per_gpu: 16384
+    grad_clip: 1.0
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    policy_loss:
+      loss_mode: "vanilla"
+      clip_cov_ratio: 0.0002
+      clip_cov_lb: 1.0
+      clip_cov_ub: 5.0
+      kl_cov_ratio: 0.0002
+      ppo_kl_coef: 0.1
+    clip_ratio_c: 3.0
+    loss_agg_mode: token-mean
+    entropy_coeff: 0
+    use_kl_loss: false
+    use_torch_compile: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    ppo_epochs: 1
+    shuffle: false
+    ulysses_sequence_parallel_size: 1
+    entropy_from_logits_with_chunking: true   # 7B: chunk entropy computation (was false)
+    entropy_checkpointing: False
+    checkpoint:
+      save_contents: []
+      load_contents: ${actor_rollout_ref.actor.checkpoint.save_contents}
+    optim:
+      lr: 1e-5
+      lr_warmup_steps: -1
+      lr_warmup_steps_ratio: 0.0
+      min_lr_ratio: 0.0
+      num_cycles: 0.5
+      warmup_style: constant
+      total_training_steps: -1
+      weight_decay: 0.01
+    fsdp_config:
+      wrap_policy:
+        min_num_params: 0
+      param_offload: true                     # 7B: offload FSDP params to CPU (was false)
+      optimizer_offload: true                 # 7B: offload optimizer states to CPU (was false)
+      offload_policy: false
+      reshard_after_forward: true
+      fsdp_size: -1
+      forward_prefetch: False
+    profiler:
+      discrete: False
+      all_ranks: False
+      ranks: null
+
+  ref:
+    strategy: ${actor_rollout_ref.actor.strategy}
+    fsdp_config:
+      param_offload: true
+      reshard_after_forward: True
+      forward_prefetch: False
+      wrap_policy:
+        min_num_params: 0
+    use_torch_compile: ${actor_rollout_ref.actor.use_torch_compile}
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 8
+    log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+    log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+    ulysses_sequence_parallel_size: ${actor_rollout_ref.actor.ulysses_sequence_parallel_size}
+    entropy_from_logits_with_chunking: False
+    entropy_checkpointing: False
+    profiler:
+      discrete: False
+      all_ranks: False
+      ranks: null
+
+  rollout:
+    name: vllm
+    mode: sync
+    temperature: 0.7
+    top_k: -1
+    top_p: 0.95
+    use_fire_sampling: False
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    dtype: bfloat16
+    gpu_memory_utilization: 0.5
+    ignore_eos: False
+    enforce_eager: True
+    free_cache_engine: True
+    load_format: safetensors                  # 7B: vLLM loads base from disk for LoRA sync (was dummy_dtensor)
+    layered_summon: true                      # 7B: layer-by-layer LoRA sync (was false)
+    tensor_model_parallel_size: 1
+    max_num_batched_tokens: 5000              # 7B: increased from 4096 to avoid hint context overflow
+    max_model_len: 5000                       # 7B: increased from 4096 (some prompts exceed 3584+512)
+    max_num_seqs: 256                         # 7B: fewer concurrent seqs (was 1024)
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 8
+    log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+    log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+    disable_log_stats: True
+    enable_chunked_prefill: false             # 7B: disabled for LoRA compatibility (was true)
+    do_sample: True
+    n: 8
+    multi_stage_wake_up: false
+    engine_kwargs:
+      vllm:
+        swap_space: null
+        disable_mm_preprocessor_cache: False
+      sglang:
+        attention_backend: null
+    val_kwargs:
+      top_k: -1
+      top_p: 1.0
+      temperature: 0
+      n: 1
+      do_sample: False
+    multi_turn:
+      enable: False
+      max_assistant_turns: null
+      tool_config_path: null
+      max_user_turns: null
+      interaction_config_path: null
+      completion_callback: null
+      use_inference_chat_template: False
+      tokenization_sanity_check_mode: strict
+      format: hermes
+    calculate_log_probs: False
+    profiler:
+      discrete: False
+      all_ranks: False
+      ranks: null
+
+critic:
+  rollout_n: ${actor_rollout_ref.rollout.n}
+  strategy: ${actor_rollout_ref.actor.strategy}
+  optim:
+    lr: 1e-5
+    lr_warmup_steps_ratio: 0.
+    min_lr_ratio: null
+    warmup_style: constant
+    total_training_steps: -1
+    weight_decay: 0.01
+  model:
+    path: ${actor_rollout_ref.model.path}
+    use_shm: False
+    tokenizer_path: ${actor_rollout_ref.model.path}
+    override_config: {}
+    external_lib: ${actor_rollout_ref.model.external_lib}
+    enable_gradient_checkpointing: True
+    enable_activation_offload: False
+    use_remove_padding: False
+    trust_remote_code: ${actor_rollout_ref.model.trust_remote_code}
+    fsdp_config:
+      param_offload: False
+      optimizer_offload: False
+      offload_policy: False
+      reshard_after_forward: True
+      wrap_policy:
+        min_num_params: 0
+      fsdp_size: -1
+      forward_prefetch: False
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+  ppo_mini_batch_size: ${actor_rollout_ref.actor.ppo_mini_batch_size}
+  ppo_micro_batch_size: null
+  ppo_micro_batch_size_per_gpu: null
+  forward_micro_batch_size: ${critic.ppo_micro_batch_size}
+  forward_micro_batch_size_per_gpu: ${critic.ppo_micro_batch_size_per_gpu}
+  use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+  ppo_max_token_len_per_gpu: 32768
+  forward_max_token_len_per_gpu: ${critic.ppo_max_token_len_per_gpu}
+  ulysses_sequence_parallel_size: 1
+  ppo_epochs: ${actor_rollout_ref.actor.ppo_epochs}
+  shuffle: ${actor_rollout_ref.actor.shuffle}
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  loss_agg_mode: ${actor_rollout_ref.actor.loss_agg_mode}
+  checkpoint:
+    save_contents: ['model', 'optimizer', 'extra']
+    load_contents: ${critic.checkpoint.save_contents}
+  profiler:
+    discrete: False
+    all_ranks: False
+    ranks: null
+
+reward_model:
+  enable: False
+  strategy: ${actor_rollout_ref.actor.strategy}
+  model:
+    input_tokenizer: ${actor_rollout_ref.model.path}
+    path: ${actor_rollout_ref.model.path}
+    use_shm: False
+    external_lib: ${actor_rollout_ref.model.external_lib}
+    use_remove_padding: False
+    use_fused_kernels: ${actor_rollout_ref.model.use_fused_kernels}
+    trust_remote_code: False
+    fsdp_config:
+      wrap_policy:
+        min_num_params: 0
+      param_offload: False
+      reshard_after_forward: True
+      fsdp_size: -1
+      forward_prefetch: False
+  micro_batch_size: null
+  micro_batch_size_per_gpu: null
+  max_length: null
+  ulysses_sequence_parallel_size: 1
+  use_dynamic_bsz: ${critic.use_dynamic_bsz}
+  forward_max_token_len_per_gpu: ${critic.forward_max_token_len_per_gpu}
+  reward_manager: naive
+  launch_reward_fn_async: False
+  sandbox_fusion:
+    url: null
+    max_concurrent: 64
+    memory_limit_mb: 1024
+  profiler:
+    discrete: False
+    all_ranks: False
+    ranks: null
+
+custom_reward_function:
+  path: verl_grpo/reward/compute_score.py
+  name: compute_score
+
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: True
+  use_kl_in_reward: False
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.001
+    horizon: 10000
+    target_kl: 0.1
+  use_pf_ppo: False
+  pf_ppo:
+    reweight_method: pow
+    weight_pow: 2.0
+
+trainer:
+  seed: 0                                     # Global seed (0 = no explicit seeding, >0 = set all RNGs)
+  balance_batch: True
+  total_epochs: 3
+  total_training_steps: null
+  profile_steps: null
+  controller_nsight_options:
+    trace: "cuda,nvtx,cublas,ucx"
+    cuda-memory-usage: "true"
+    cuda-graph-trace: "graph"
+  worker_nsight_options:
+    trace: "cuda,nvtx,cublas,ucx"
+    cuda-memory-usage: "true"
+    cuda-graph-trace: "graph"
+    capture-range: "cudaProfilerApi"
+    capture-range-end: null
+    kill: none
+  project_name: verl_grpo_math
+  experiment_name: qwen2.5_7b_grpo_lora
+  logger: ['console']
+  log_val_generations: 0
+  rollout_data_dir: null
+  validation_data_dir: null
+  diagnostic_log_dir: null
+  nnodes: 1
+  n_gpus_per_node: 2
+  save_freq: -1
+  resume_mode: auto
+  resume_from_path: null
+  val_before_train: True
+  val_only: False
+  test_freq: 5
+  critic_warmup: 0
+  default_hdfs_dir: null
+  del_local_ckpt_after_load: False
+  default_local_dir: runs/${trainer.experiment_name}
+  max_actor_ckpt_to_keep: null
+  max_critic_ckpt_to_keep: null
+  ray_wait_register_center_timeout: 300
+  device: cuda
+
+hints:
+  enabled: false
+  # hint_mode options: solution_aware, solution_blind, solution_aware_failed_conditional,
+  #   hierarchical (replace all n), hierarchical_replacement (Scaf-GRPO: replace 1 of n),
+  #   hierarchical2 (L1-L5 cascade with system prompt + hint probability),
+  #   replacement2 (hierarchical2 prompts + Scaf-GRPO replacement, IS compatible)
+  #   hint_SFT (like replacement2 but collects gold data for SFT at epoch boundary, no GRPO replacement)
+  hint_mode: "solution_aware"
+  prompt_mode: "original"
+  hint_temperature: 0.7
+  hint_max_tokens: 512
+  use_external_server: false
+  hint_server_url: "http://localhost:8105"
+  hint_model_mode: "base"
+  lora_sync_frequency: "never"
+  lora_sync_path: "/tmp/hint_lora_sync"
+  hint_levels:                           # Used by hierarchical / hierarchical2 modes
+    - L1_blind                           # Configurable: pick any subset (e.g. skip L1 for less parroting)
+    - L2_conceptual
+    - L3_strategic
+    - L4_detailed
+    # - L5_solution                      # Uncomment for hierarchical2 L5 (reference solution rephrase)
+  hint_n_candidates: 2                   # Hint candidates per level (for hierarchical)
+  hint_source: "self"                    # "self" (embedded vLLM) | "external_vllm" | "frontier"
+  frontier_api: "anthropic"              # "anthropic" | "openai" (only when hint_source=frontier)
+  frontier_model: "claude-sonnet-4-20250514"  # Frontier model ID
+  frontier_concurrency: 10               # Max concurrent frontier API calls
+  frontier_max_retries: 5                # Retries per failed frontier API call
+  anti_repetition_system_prompt: null    # Set to string for L1-L4 anti-repetition (hierarchical2 only)
+  hint_probability: 1.0                  # Probability of invoking hint machinery per batch (0.0-1.0)
+  parallel_cascade: false                 # true = batch all regen levels in 1 vLLM call (faster, hierarchical2 only)
+  replace_count: null                       # Max trajectories to replace per group (replacement2; null=all correct, or 1-2 to cap)
+  compute_is_ratio: false                  # true = extra actor forward pass to compute log π_old(y|x̃) for IS diagnostics
+  hint_trigger_threshold: 0                # Hint when n_correct <= T (0 = all-zero only, backward compat)
+  hint_trigger_mode: simple                # "simple" = threshold on all n; "two_phase" = 0/first_half then T/all
+  n_train: null                            # GRPO group size for actor update (null = same as rollout.n)
+  is_correction_mode: none                  # "none" | "per_token_uniform" | "per_token" (IS advantage weighting)
+  is_correction_clamp_min: 0.3              # Floor for IS weight (prevents zeroing out advantages)
+  is_weight_power: 1.0                      # Power compression: w = exp(-d)^gamma (1.0 = no compression, 0.5 = sqrt)
+  sft_config:                                # Only used when hint_mode=hint_SFT
+    sft_epochs: 1                            # SFT passes over gold data per epoch boundary
+    sft_micro_batch_size_per_gpu: 4          # Micro batch size for SFT forward/backward
+    sft_lr: 1e-5                             # Learning rate for SFT optimizer (separate from GRPO)
+
+curriculum:
+  skip_all_correct: false
+  skip_all_correct_start_epoch: 1    # Only skip all-correct groups from this epoch (1 = always when enabled)
+  skip_unhintable: false
+  skip_mastered:
+    enabled: false
+    threshold: 0.75               # Skip if accuracy >= 75% (6+/8)
+    consecutive_epochs: 2         # Require 2 consecutive epochs above threshold
+    start_epoch: 3                # Only activate from epoch 3 onwards
+  skip_beyond_reach:
+    enabled: false
+    threshold: 0.75               # Skip hint replacement if >= this fraction of regen trajectories correct (6/8)
+    min_observations: 1           # Require N observations before skipping (1 = immediate per-step)
+    start_epoch: 1                # Active from this epoch (1 = always)
+  skip_permanently_stuck:
+    enabled: false
+    min_observations: 3           # Require N base observations before marking stuck
+    min_hint_observations: 2      # Require N hint observations before marking stuck
+    start_step: 10                # Only activate after this many global steps
+
+ray_init:
+  num_cpus: null
+  timeline_json_file: null

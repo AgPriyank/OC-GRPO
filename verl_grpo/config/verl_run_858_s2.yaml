@@ -1,0 +1,80 @@
+# ============================================================
+# veRL Run 858_s2: seed=123 variant of run 858 Hierarchical2 L1-L5 FRONTIER (Claude Sonnet) + IS Per-Token,
+#               4-GPU, Extreme Hard (0/64)
+# ============================================================
+# Model: Qwen/Qwen2.5-7B-Instruct + LoRA (rank=64, alpha=128)
+# Dataset: Extreme Hard — 595 MATH problems with 0/64 correct
+# GPUs: 4x A100 40GB (FSDP + 2 vLLM replicas via TP=2)
+# n=8 trajectories per prompt, 4 epochs, ppo_epochs=1
+# Hints: hierarchical2 — full L1-L5 cascade, Claude Sonnet (frontier API)
+# IS Correction: per_token, clamp_min=0.01, power=1.0
+#
+# Compare with run 853 (self-hints):
+#   - Same everything except hint source
+#   - Frontier hints (Claude Sonnet) should be higher quality than self-hints
+#   - Tests whether hint quality matters on extreme-hard problems
+#
+# Requires: ANTHROPIC_API_KEY environment variable
+#
+# Batch math:
+#   train_batch_size=32, n=8 -> 256 sequences/step
+#   steps_per_epoch = 536 / 32 = 16
+#   total_steps = 16 x 4 = 64
+# ============================================================
+
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run858_s2
+  seed: 123
+  total_epochs: 4
+  n_gpus_per_node: 4
+  diagnostic_log_dir: runs/verl_grpo_run858_s2/diagnostics
+
+data:
+  train_files: verl_grpo/data_extremehard_595/train.parquet
+  val_files: verl_grpo/data_extremehard_595/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 3000
+
+actor_rollout_ref:
+  model:
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 16
+    calculate_log_probs: True
+    logprobs: 1
+    seed: 123
+
+hints:
+  enabled: true
+  hint_mode: hierarchical2
+  prompt_mode: original
+  hint_source: frontier
+  frontier_api: anthropic
+  frontier_model: "claude-sonnet-4-20250514"
+  frontier_concurrency: 10
+  frontier_max_retries: 5
+  hint_n_candidates: 1
+  parallel_cascade: false
+  hint_levels:
+    - L1_blind
+    - L2_conceptual
+    - L3_strategic
+    - L4_detailed
+    - L5_solution
+  anti_repetition_system_prompt: "You are a math problem solver. When given a hint, use it to guide your reasoning, but write your solution independently. Do not repeat, copy, or paraphrase the hint text. Show your own step-by-step work and arrive at the answer through your own reasoning."
+  hint_probability: 1.0
+  compute_is_ratio: true
+  is_correction_mode: per_token
+  is_correction_clamp_min: 0.01

@@ -1,0 +1,52 @@
+# Seed variant: seed=123
+# Parent: 852_n16 (Qwen 7B n=16 rollout)
+
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run852_n16_s2
+  seed: 123
+  total_epochs: 4
+  n_gpus_per_node: 4
+
+data:
+  train_files: verl_grpo/data_extremehard_595/train.parquet
+  val_files: verl_grpo/data_extremehard_595/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 3000
+
+actor_rollout_ref:
+  model:
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    n: 16
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 16
+    calculate_log_probs: true
+    logprobs: 1
+    seed: 123
+
+hints:
+  enabled: true
+  hint_mode: prefix
+  prompt_mode: original
+  prefix_fractions:
+    - 0.2
+    - 0.4
+    - 0.6
+    - 0.8
+    - 1.0
+  anti_repetition_system_prompt: "You are a math problem solver. When given a hint, use it to guide your reasoning, but write your solution independently. Do not repeat, copy, or paraphrase the hint text. Show your own step-by-step work and arrive at the answer through your own reasoning."
+  hint_probability: 1.0
+  compute_is_ratio: true
+  is_correction_mode: per_token
+  is_correction_clamp_min: 0.01

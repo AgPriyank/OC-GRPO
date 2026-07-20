@@ -1,0 +1,21 @@
+# --- run artifacts ---
+runs/
+results/
+logs/
+wandb/
+outputs/
+models/merged_models/
+offline_guided_data*/
+
+# --- downloaded test sets (rebuild via scripts/download_benchmarks.py etc.) ---
+data/*_test_problems.json
+data/omnimath_test_*_problems.json
+
+# --- python ---
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- os ---
+.DS_Store

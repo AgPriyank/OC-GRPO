@@ -1,0 +1,68 @@
+# ============================================================
+# veRL Run 852_n16: Solution Prefix Cascade + IS Per-Token, n=16 rollout
+# ============================================================
+# Parent: run 852 (online prefix cascade + IS, n=8, 4-GPU TP=2)
+# Change: n=8 -> n=16
+# No batch size changes (if OOM, adjust later)
+#
+# Model: Qwen/Qwen2.5-7B-Instruct + LoRA (rank=64, alpha=128)
+# Dataset: Extreme Hard — 595 MATH problems with 0/64 correct
+# GPUs: 4x A100 40GB (FSDP + 2 vLLM replicas via TP=2)
+# n=16 trajectories per prompt, 4 epochs, ppo_epochs=1
+# Hints: solution prefix cascade (20% -> 40% -> 60% -> 80% -> 100%)
+# IS Correction: per_token, clamp_min=0.01
+#
+# Batch math:
+#   train_batch_size=32, n=16 -> 512 sequences/step
+#   steps_per_epoch = 536 / 32 = 16
+#   total_steps = 16 x 4 = 64
+# ============================================================
+
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run852_n16
+  total_epochs: 4
+  n_gpus_per_node: 4
+  diagnostic_log_dir: runs/verl_grpo_run852_n16/diagnostics
+
+data:
+  train_files: verl_grpo/data_extremehard_595/train.parquet
+  val_files: verl_grpo/data_extremehard_595/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 3000
+
+actor_rollout_ref:
+  model:
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    n: 16
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    log_prob_micro_batch_size_per_gpu: 16
+    calculate_log_probs: True
+    logprobs: 1
+
+hints:
+  enabled: true
+  hint_mode: prefix
+  prompt_mode: original
+  prefix_fractions:
+    - 0.2
+    - 0.4
+    - 0.6
+    - 0.8
+    - 1.0
+  anti_repetition_system_prompt: "You are a math problem solver. When given a hint, use it to guide your reasoning, but write your solution independently. Do not repeat, copy, or paraphrase the hint text. Show your own step-by-step work and arrive at the answer through your own reasoning."
+  hint_probability: 1.0
+  compute_is_ratio: true
+  is_correction_mode: per_token
+  is_correction_clamp_min: 0.01

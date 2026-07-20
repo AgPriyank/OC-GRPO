@@ -1,0 +1,54 @@
+# n=16 rollout variant of 951_non_masked (Qwen2.5-3B)
+defaults:
+  - ppo_trainer_7b
+  - _self_
+
+trainer:
+  experiment_name: verl_grpo_run951_non_masked_n16
+  total_epochs: 4
+  n_gpus_per_node: 2
+
+data:
+  train_files: verl_grpo/data_qwen3b_extremehard/train.parquet
+  val_files: verl_grpo/data_qwen3b_extremehard/val.parquet
+  train_batch_size: 32
+  max_prompt_length: 4096
+
+actor_rollout_ref:
+  model:
+    path: Qwen/Qwen2.5-3B-Instruct
+    lora_dropout: 0.05
+  actor:
+    ppo_epochs: 1
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 4
+    entropy_from_logits_with_chunking: false
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+  ref:
+    fsdp_config:
+      param_offload: false
+    log_prob_micro_batch_size_per_gpu: 16
+  rollout:
+    n: 16
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.5
+    log_prob_micro_batch_size_per_gpu: 16
+    calculate_log_probs: true
+    logprobs: 1
+
+hints:
+  enabled: true
+  hint_mode: prefix
+  prompt_mode: hinted
+  prefix_fractions:
+    - 0.2
+    - 0.4
+    - 0.6
+    - 0.8
+    - 1.0
+  anti_repetition_system_prompt: "You are a math problem solver. When given a hint, use it to guide your reasoning, but write your solution independently. Do not repeat, copy, or paraphrase the hint text. Show your own step-by-step work and arrive at the answer through your own reasoning."
+  hint_probability: 1.0
+  compute_is_ratio: false
+  is_correction_mode: none
