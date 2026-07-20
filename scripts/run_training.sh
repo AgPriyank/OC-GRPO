@@ -73,7 +73,7 @@ if [ -z "${TRAIN_PARQUET}" ]; then
 fi
 if [ ! -f "${TRAIN_PARQUET}" ]; then
   echo "ERROR: training data not found: ${TRAIN_PARQUET}"
-  echo "See docs/REPRODUCING.md ('Training data') for how to (re)build it."
+  echo "Rebuild it with scripts/prepare_data.py from the raw JSONs in data/."
   exit 1
 fi
 

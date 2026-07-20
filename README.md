@@ -27,7 +27,6 @@ scripts/                    Data pipeline, launchers, test-set builders
 jobs/                       SLURM templates (adapt #SBATCH headers to your cluster)
 evaluate_trained.py         Checkpoint evaluation (LoRA merge -> vLLM -> pass@k)
 baseline.py                 Eval engine + answer grading used by reward and eval
-docs/REPRODUCING.md         Full run matrix, data pipeline, eval protocol
 ```
 
 ## Quick start
@@ -75,15 +74,14 @@ temperature 0.7. Seeds: s1 = default config (unseeded), s2 = 123 (`*_s2`), s3 = 
 
 7B rows have `_s2`/`_s3` seed variants; 3B and 1.5B are single-seed, matching the paper.
 
-Hint-cascade experiments (Table 5, 7B, 3 seeds at n=8 rollouts — see
-[docs/REPRODUCING.md](docs/REPRODUCING.md) for details):
+Hint-cascade experiments (Table 5, 7B, 3 seeds at n = 8 rollouts):
 
 | Paper method | Config | Mechanism |
 |---|---|---|
 | OC-GRPO-Fixed (Hints) | `verl_run_900_masked_IS` | offline **hint**-augmented data + `prompt_masked` + IS |
 | OC-GRPO-Adaptive (Hints) | `verl_run_853` | online hierarchical hints L1–L5 (self-generated) + IS |
 | OC-GRPO (Self-Correction) | `verl_run_854` | online hints, L1 only (blind feedback on failed attempts) + IS |
-| OC-GRPO-Adaptive (Frontier Hints) | `verl_run_858` | online hints L1–L5 from Claude Sonnet (needs `ANTHROPIC_API_KEY`) + IS |
+| OC-GRPO-Adaptive (Frontier Hints) | `verl_run_858` | online hints L1–L5 from Claude Sonnet (uses the Anthropic API) + IS |
 
 ## Installation details
 
@@ -120,47 +118,27 @@ templating to verl's `RLHFDataset`; it is **required** — the PrefixRL runs
 work: the trainer imports `verl.trainer.constants_ppo` and
 `verl.utils.dataset.sampler`, which exist only in the fork.
 
-## Training
+## Training hyperparameters
 
-Run from the repo root (all paths are CWD-relative). One command per paper
-run — the launcher reads the config, finds its shipped training parquet,
-computes the epoch length, and starts training:
+All runs share the same recipe, set in `verl_grpo/config/ppo_trainer_7b.yaml`
+and inherited by every run config:
 
-```bash
-bash scripts/run_training.sh <CONFIG_NAME> [extra hydra overrides...]
-```
+| Hyperparameter | Value |
+|---|---|
+| LoRA | rank 64, α 128, dropout 0.05, all linear layers (base weights frozen) |
+| Optimizer | AdamW, lr 1e-5, weight decay 0.01, gradient clipping at norm 1.0 |
+| Batch | 32 prompts/step × n = 16 rollouts/prompt, PPO mini-batch 32, 1 PPO epoch |
+| Objective | GRPO advantages, clip ε = 0.2, no KL penalty, no entropy bonus, token-level loss aggregation |
+| Rollouts | vLLM, temperature 0.7, top-p 0.95, max 1200 response tokens |
+| Reward | binary: `\boxed{}` answer matches ground truth under symbolic equivalence |
+| IS correction (OC-GRPO runs) | per-token, weights clamped to [0.01, 1] |
+| Prefix cascade | fractions {0.2, 0.4, 0.6, 0.8, 1.0} of the reference solution |
+| Schedule | 4 epochs; LoRA checkpoint at every epoch boundary → `runs/<experiment_name>/global_step_<N>/actor/lora_adapter/` |
 
-| Run | Command | GPUs |
-|---|---|---|
-| OC-GRPO-Fixed, 7B | `bash scripts/run_training.sh verl_run_901_masked_IS_n16` | 4× A100-40GB |
-| OC-GRPO-Adaptive, 7B | `bash scripts/run_training.sh verl_run_852_n16` | 4× A100-40GB |
-| Vanilla GRPO, 7B | `bash scripts/run_training.sh verl_run_652_n16` | 4× A100-40GB |
-| POPE\* / PrefixRL\* / BREAD\*, 7B | `verl_run_901_n16` / `verl_run_901_prefixrl_n16` / `verl_run_852_non_masked_n16` | 4× A100-40GB |
-| Any 3B run | e.g. `bash scripts/run_training.sh verl_run_951_n16` | 2× A100-40GB |
-| Any 1.5B run | e.g. `bash scripts/run_training.sh verl_run_1506_masked_IS_n16` | 2× A100-40GB |
-| Seed variants (7B) | append `_s2` (seed 123) or `_s3` (seed 456), e.g. `verl_run_852_n16_s2` | 4× A100-40GB |
-| Hint-cascade runs (Table 5) | `verl_run_900_masked_IS`, `verl_run_853`, `verl_run_854`, `verl_run_858` | 4× A100-40GB |
-
-Useful overrides:
-
-```bash
-# wandb logging (needs WANDB_API_KEY)
-bash scripts/run_training.sh verl_run_852_n16 trainer.logger='[console,wandb]'
-```
-
-On SLURM: `CONFIG_NAME=verl_run_852_n16 sbatch jobs/train_4gpu.sbatch`
-(edit the `#SBATCH` headers for your cluster; 3B/1.5B runs use
-`jobs/train_2gpu.sbatch`). Wall-clock: roughly 3–13 h for 1.5B/3B runs and
-up to 1–2 days for 7B runs on the listed GPUs (we used 24 h / 48 h SLURM
-walltimes for 2-GPU / 4-GPU jobs).
-
-Each run trains 4 epochs and saves a LoRA checkpoint at every epoch boundary
-to `runs/<experiment_name>/global_step_<N>/actor/lora_adapter/` — see
-[docs/REPRODUCING.md](docs/REPRODUCING.md) for the step numbers per run.
-The parquets in `verl_grpo/data_*/` are the exact training data used in the
-paper; `data/*.json` are the raw problem sets they were built from, and
-`scripts/prepare_data.py` regenerates the base parquets from them if you want
-to rebuild (see README section below).
+7B runs use 4× A100-40GB (TP=2); 3B and 1.5B runs use 2× A100-40GB (TP=1).
+The hint-cascade runs (`verl_run_900_masked_IS`, `verl_run_853/854/858`) use
+n = 8 rollouts per prompt. Launch any run from the repo root with
+`bash scripts/run_training.sh <CONFIG_NAME>` (SLURM templates in `jobs/`).
 
 ## Evaluation
 
@@ -169,8 +147,19 @@ from HuggingFace first:
 
 ```bash
 python scripts/download_benchmarks.py     # AIME 1983-2024/24/25/26, AMC23, Minerva, OlympiadBench, Gaokao2023-En
-python scripts/download_omnimath.py       # Omni-MATH (then subsample to 1000, see docs/REPRODUCING.md)
+python scripts/download_omnimath.py       # Omni-MATH (full 4428-problem export)
 python scripts/extract_new_test_sets.py   # OlymMATH
+```
+
+The paper's `omnimath1000` set is a seed-42 subsample of the full export:
+
+```python
+import json, random
+d = json.load(open("data/omnimath_test_4428_problems.json"))
+random.seed(42)
+d["problems"] = random.sample(d["problems"], 1000)
+d["metadata"]["n_problems"] = 1000
+json.dump(d, open("data/omnimath_test_1000_problems.json", "w"), indent=2)
 ```
 
 Then evaluate a checkpoint with the paper protocol (16 trajectories,
@@ -185,49 +174,6 @@ The first eval of a checkpoint merges the LoRA adapter into a full model
 (cached under `models/merged_models/`); results land in
 `results/verl_run<RUN>_step<STEP>_<TESTSET>/results.json` with per-problem
 trajectory correctness, from which pass@k is computed with the unbiased
-estimator 1 − C(n−c, k)/C(n, k). See
-[docs/REPRODUCING.md](docs/REPRODUCING.md) for checkpoint steps per run and
-the full protocol.
-
-## Rebuilding the data from scratch (optional)
-
-The shipped parquets are the paper's exact training data. To regenerate them
-end-to-end (or apply OC-GRPO to a new model/dataset), the pipeline is:
-
-1. **Pool**: `data/math_train_5586_problems.json` — MATH levels 3–5 train split.
-2. **ExtremeHard extraction**: roll out the base model 64× per problem
-   (`evaluate_math_full.py`), merge shards (`scripts/merge_eval_shards.py`),
-   keep problems with 0/64 correct (`scripts/extract_hard_problems.py`).
-3. **Base parquet**: `python scripts/prepare_data.py --problems <extremehard.json> --output verl_grpo/data_<name> --val-ratio 0.1 --seed 42`
-4. **Offline augmentation** (for POPE\*/PrefixRL\*/OC-GRPO-Fixed): generate
-   minimal solving prefixes with the base model
-   (`jobs/generate_offline_prefixes.sbatch`, 5 GPU shards), then merge
-   (`jobs/merge_offline_guided.sbatch`). Note this step is stochastic — the
-   shipped augmented parquets are the paper's realization.
-
-Full details in [docs/REPRODUCING.md](docs/REPRODUCING.md).
-
-## Environment variables
-
-| Variable | When needed |
-|---|---|
-| `WANDB_API_KEY` | only with `trainer.logger='[console,wandb]'` |
-| `ANTHROPIC_API_KEY` | only for frontier-hint runs (`verl_run_858*`) |
-
-## License
-
-Apache-2.0 (same as veRL). MATH problems originate from the
-[Hendrycks et al. MATH dataset](https://github.com/hendrycks/math); benchmark
-test sets are downloaded from their respective HuggingFace sources and keep
-their original licenses.
-
-## Citation
-
-```bibtex
-@article{agrawal2026ocgrpo,
-  title   = {Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information},
-  author  = {Agrawal, Priyank and Samanta, Ankur and Ghasemlou, Shervin and Vidolov, Boris and Bhandari, Jalaj and Asadi, Kavosh and Jiang, Daniel and Modi, Aditya},
-  year    = {2026},
-  journal = {arXiv preprint}
-}
-```
+estimator 1 − C(n−c, k)/C(n, k). Epoch-4 checkpoint
+steps: 7B online 64, 7B offline 120; 3B online 76, offline 136; 1.5B online
+64, offline 124.

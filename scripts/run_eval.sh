@@ -15,7 +15,7 @@
 #
 # Test-set JSONs are NOT shipped in this repo; build them first with
 # scripts/download_benchmarks.py / download_omnimath.py / extract_new_test_sets.py
-# (see docs/REPRODUCING.md, 'Evaluation').
+# (see README, 'Evaluation').
 # ============================================================================
 set -e
 
@@ -47,7 +47,7 @@ esac
 
 if [ ! -f "${PROBLEMS_FILE}" ]; then
   echo "ERROR: ${PROBLEMS_FILE} not found."
-  echo "Build test sets first — see docs/REPRODUCING.md ('Evaluation')."
+  echo "Build test sets first — see README ('Evaluation')."
   exit 1
 fi
 if [ ! -d "${LORA_PATH}" ]; then
