@@ -177,3 +177,16 @@ trajectory correctness, from which pass@k is computed with the unbiased
 estimator 1 − C(n−c, k)/C(n, k). Epoch-4 checkpoint
 steps: 7B online 64, 7B offline 120; 3B online 76, offline 136; 1.5B online
 64, offline 124.
+
+## Citation
+
+If you like this work and find it useful, please consider citing it:
+
+```bibtex
+@article{agrawal2026off,
+  title={Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information},
+  author={Agrawal, Priyank and Samanta, Ankur and Ghasemlou, Shervin and Bhandari, Jalaj and Asadi, Kavosh and Jiang, Daniel and Modi, Aditya},
+  journal={arXiv preprint arXiv:2607.19313},
+  year={2026}
+}
+```
