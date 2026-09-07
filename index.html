@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Off-Context GRPO</title>
+<meta name="description" content="OC-GRPO breaks the RLVR learning cliff with privileged guidance, then corrects the update with one importance ratio so training still optimizes the objective you deploy.">
+<meta property="og:title" content="Off-Context GRPO">
+<meta property="og:description" content="Learning to reason on hard problems using privileged information: guidance decides where the model explores, an importance ratio keeps the objective honest.">
+<meta property="og:image" content="https://agpriyank.github.io/OC-GRPO/assets/fig1_schematic.png">
+<meta property="og:url" content="https://agpriyank.github.io/OC-GRPO/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg:#fbfbf8; --surface:#ffffff; --ink:#20261f; --muted:#5d675e; --line:#e2e6dd;
+  --accent:#2e7d32; --accent-ink:#256129; --accent-soft:#eaf3e8; --code-bg:#f3f5f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#131712; --surface:#1a201a; --ink:#e6eae2; --muted:#9aa596; --line:#2b332a;
+    --accent:#82c785; --accent-ink:#9ad49c; --accent-soft:#213321; --code-bg:#1e241d;
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+body {
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif; font-size:17.5px; line-height:1.62;
+}
+main { max-width:58rem; margin:0 auto; padding:0 22px 90px; }
+.masthead { text-align:center; padding:64px 0 20px; }
+.venue {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:13px; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 18px;
+}
+h1 {
+  font-size:clamp(30px,5.4vw,44px); font-weight:600; line-height:1.16;
+  margin:0 auto 10px; max-width:24ch; text-wrap:balance;
+}
+.subtitle { font-style:italic; color:var(--muted); margin:0 0 26px; font-size:1.06em; }
+.authors { margin:0 auto 6px; max-width:44rem; font-size:1.02em; }
+.authors a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line); }
+.authors a:hover { border-bottom-color:var(--accent); }
+.authors sup { font-size:.68em; color:var(--muted); }
+.affil {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; color:var(--muted);
+  font-size:13.5px; margin:2px 0 0;
+}
+.btns { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:30px 0 8px; }
+.btn {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14.5px; font-weight:500;
+  color:var(--ink); background:var(--surface); border:1px solid var(--line);
+  border-radius:999px; padding:8px 20px; text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:border-color .15s ease;
+}
+.btn:hover, .btn:focus-visible { border-color:var(--accent); outline:none; }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+@media (prefers-color-scheme: dark) { .btn.primary { color:#10240f; } }
+figure { margin:38px 0; }
+figure img {
+  display:block; width:100%; height:auto; background:#fff;
+  border:1px solid var(--line); border-radius:6px;
+}
+figcaption {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:14px; color:var(--muted);
+  line-height:1.5; margin-top:10px; max-width:46rem;
+}
+figcaption b { color:var(--ink); font-weight:600; }
+article { max-width:46rem; margin:0 auto; }
+article > figure.wide { width:100%; }
+h2 {
+  font-size:26px; font-weight:600; line-height:1.25; margin:52px 0 14px; text-wrap:balance;
+}
+p { margin:0 0 16px; }
+strong { font-weight:600; }
+.eq-panel {
+  background:var(--accent-soft); border:1px solid var(--line); border-radius:8px;
+  padding:22px 24px; margin:26px 0; text-align:center; overflow-x:auto;
+}
+.eq { font-size:1.12em; white-space:nowrap; font-style:italic; }
+.frac { display:inline-block; vertical-align:middle; text-align:center; margin:0 4px; }
+.frac > span { display:block; padding:1px 8px; }
+.frac > span:first-child { border-bottom:1.4px solid currentColor; }
+.eq sub, .eq sup { font-size:.66em; font-style:normal; }
+.eq-note {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-style:normal;
+  font-size:13.5px; color:var(--muted); margin:12px 0 0;
+}
+.callout {
+  border-left:3px solid var(--accent); background:var(--surface);
+  padding:14px 20px; margin:24px 0; border-radius:0 6px 6px 0;
+}
+.callout p { margin:0; }
+ul { padding-left:22px; margin:0 0 16px; }
+li { margin:7px 0; }
+pre.bibtex {
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:13px; line-height:1.55;
+  background:var(--code-bg); border:1px solid var(--line); border-radius:8px;
+  padding:18px 20px; overflow-x:auto; margin:18px 0 8px;
+}
+.copybtn {
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:13.5px; font-weight:500;
+  color:var(--accent-ink); background:none; border:1px solid var(--accent);
+  border-radius:5px; padding:5px 14px; cursor:pointer;
+}
+.copybtn:hover, .copybtn:focus-visible { background:var(--accent-soft); outline:none; }
+footer {
+  border-top:1px solid var(--line); margin-top:64px; padding-top:22px;
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:13.5px; color:var(--muted);
+}
+footer a { color:inherit; }
+</style>
+</head>
+<body>
+<main>
+<header class="masthead">
+  <p class="venue">arXiv preprint &middot; 2026</p>
+  <h1>Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information</h1>
+  <p class="subtitle">Guidance decides where the model explores. One importance ratio keeps the objective honest.</p>
+  <p class="authors">
+    Priyank Agrawal<sup>1,2,*</sup>, Ankur Samanta<sup>1,2</sup>, Shervin Ghasemlou<sup>1</sup>,
+    Boris Vidolov<sup>1</sup>, Jalaj Bhandari<sup>1</sup>, Kavosh Asadi<sup>1,&dagger;</sup>,
+    Daniel Jiang<sup>1,&dagger;</sup>, Aditya Modi<sup>1,&dagger;</sup>
+  </p>
+  <p class="affil"><sup>1</sup>Meta AI &nbsp;&middot;&nbsp; <sup>2</sup>Columbia University &nbsp;&middot;&nbsp; <sup>*</sup>Work done at Meta &nbsp;&middot;&nbsp; <sup>&dagger;</sup>Joint last author</p>
+  <nav class="btns">
+    <a class="btn primary" href="https://arxiv.org/abs/2607.19313">arXiv</a>
+    <a class="btn" href="https://arxiv.org/pdf/2607.19313">PDF</a>
+    <a class="btn" href="https://github.com/AgPriyank/OC-GRPO">Code &amp; data</a>
+    <a class="btn" href="#bibtex">BibTeX</a>
+  </nav>
+</header>
+
+<figure>
+  <img src="assets/fig1_schematic.png" alt="Three-panel schematic. (a) Standard GRPO: all four rollouts from a hard problem receive reward zero, so advantages vanish. (b) Guided rollouts: adding guidance to the prompt produces two successes. (c) OC-GRPO correction: each advantage is reweighted by the importance ratio between the original and guided prompts, shrinking guided successes and amplifying persistent failures.">
+  <figcaption><b>Off-Context GRPO in one picture.</b> (a) On hard problems every unguided rollout fails and GRPO's group-relative advantages vanish. (b) Guidance in the prompt produces successful rollouts, but they now come from a distribution deployment never sees. (c) OC-GRPO keeps the guided rollouts and reweights their advantages with an importance ratio: successes made likely by the guidance earn less credit, failures that persist despite it are penalized more.</figcaption>
+</figure>
+
+<article>
+
+<h2>The learning cliff</h2>
+<p>Reinforcement learning with verifiable rewards improves LLM reasoning only on problems the model already solves at least occasionally. GRPO learns from within-group reward variance: some rollouts succeed, others fail, and the successful ones are reinforced relative to the failures. On a problem where <em>every</em> rollout fails, rewards are uniformly zero, the group-relative advantage is zero, and the gradient is exactly zero, no matter how long training continues. The training loop keeps resampling those problems epoch after epoch, spending GPU hours to learn nothing. We call this the <strong>learning cliff</strong>.</p>
+
+<h2>Privileged information breaks the cliff</h2>
+<p>A tested workaround is <strong>privileged information</strong>: auxiliary context, available during training but not at deployment, added to the prompt so that correct continuations become reachable. We construct the sharpest version of the setting: from MATH Levels 3-5 we keep the 595 problems on which Qwen2.5-7B-Instruct fails all 64 sampled attempts, so vanilla GRPO receives no learning signal at all by construction. Prepending a prefix of the reference solution lifts the expected verifier reward on this pool from 0.09 to 0.79.</p>
+
+<figure class="wide">
+  <img src="assets/prefix_cascade.png" alt="Stacked bar chart. With no guidance, 0% of the 595 hard problems are solved. Solution prefixes of increasing length unlock 9.1%, 22.4%, 35.8%, 53.8%, and 79.0% of the pool.">
+  <figcaption><b>The cliff is breakable.</b> Fraction of the 595 hard problems unlocked under the base model as the solution-prefix guidance grows from none to the full reference solution.</figcaption>
+</figure>
+
+<h2>But guided rollouts are off-context</h2>
+<p>Here is the subtle part. Guided methods sample rollouts under the guided prompt and then compute the policy-gradient update as if sampling and evaluation distributions matched. The PPO-style ratio carries the guided prompt in both numerator and denominator, so the update optimizes a <em>guided</em> objective, while deployment serves the original prompt with no guidance in sight. We call this mismatch the <strong>off-context problem</strong>. Masking the guidance tokens out of the loss does not fix it: masking changes which tokens receive gradient, not what they condition on.</p>
+<p>The mismatch is not cosmetic. Training on guided rollouts without correction biases the gradient, and we show the bias can accumulate: gradient norms spike, the log-probability gap between the guided and unguided contexts widens, and in some runs the reward collapses outright mid-training.</p>
+
+<h2>One ratio fixes it</h2>
+<p>OC-GRPO removes the bias with a textbook idea: importance sampling, the standard correction for estimating under one distribution while sampling from another. Replace the probability ratio in the GRPO objective with one whose numerator conditions on the original prompt and whose denominator conditions on the guided prompt that actually produced the token:</p>
+
+<div class="eq-panel">
+  <span class="eq">
+    &rho;<sup>oc</sup><sub>t</sub>(&theta;) =
+    <span class="frac">
+      <span>&pi;<sub>&theta;</sub>(y<sub>t</sub> | x, y<sub>&lt;t</sub>)</span>
+      <span>&pi;<sub>&theta;<sub>old</sub></sub>(y<sub>t</sub> | g(x), y<sub>&lt;t</sub>)</span>
+    </span>
+  </span>
+  <p class="eq-note">x is the original prompt, g(x) the guided prompt. With no guidance, g(x) = x and the update is exactly vanilla GRPO.</p>
+</div>
+
+<p>The corrected estimator is unbiased for the unguided objective, and the variance of the correction scales with the length of the guidance rather than the rollout, which yields a clean operating rule: use the shortest guidance that breaks the cliff. In practice it is a one-line change to GRPO. No reward shaping, no entropy control, no auxiliary SFT loss. The overhead is a single no-grad forward pass per step, about 5.5% of step time at 7B, and nothing at inference.</p>
+
+<h2>The ratio assigns credit by behavior</h2>
+<p>The correction is more than bookkeeping. We prove that, averaged over successful guided rollouts, the correction factor equals p(x)/q(x) &lt; 1, and over failed ones (1&minus;p(x))/(1&minus;q(x)) &gt; 1, where p and q are the success rates under the original and guided prompts.</p>
+<div class="callout"><p>A success that leaned on the hint is discounted in proportion to how much it leaned. A failure that persists despite the hint draws an amplified penalty. The update reinforces solving rather than hint-following, with no extra design choices.</p></div>
+
+<h2>Results</h2>
+<p>On Qwen2.5-7B-Instruct (LoRA, veRL, 4 epochs, 16 rollouts per prompt, 3 seeds), evaluated on AIME (1983-2026), Gaokao2023 and OmniMath: OC-GRPO reaches <strong>31.1 average Pass@1 against 27.3 for vanilla GRPO, a 13.7% relative gain</strong>, ahead of every guided baseline under an identical protocol. Pass@16 rises as well, from 49.6 to 51.4 on the held-out benchmarks and from 7.0 to 14.8 on the hard training pool, so the gains do not come from collapsing the model's sampling diversity.</p>
+
+<figure class="wide">
+  <img src="assets/results_table.png" alt="Results table on Qwen2.5-7B-Instruct comparing Base, Vanilla GRPO, PrefixRL, POPE, BREAD, OC-GRPO-Fixed and OC-GRPO-Adaptive across the hard training pool, AIME 1983-2026, Gaokao2023 and OmniMath at Pass@1 and Pass@16. OC-GRPO-Fixed attains the best average Pass@1 of 31.1, a 13.7 percent relative gain over vanilla GRPO.">
+  <figcaption><b>Main results.</b> Seed-averaged Pass@1 and Pass@16 with relative gains over vanilla GRPO. OC-GRPO-Fixed selects a per-problem guidance level once before training; OC-GRPO-Adaptive re-selects it during training.</figcaption>
+</figure>
+
+<p>The pattern sharpens at smaller scale. Guided methods without the correction rely on <em>back-generalization</em>, the hope that improvement under the guided prompt transfers to the unguided one. At 7B a large model absorbs much of the mismatch. At 3B and 1.5B it does not: uncorrected guided baselines fall below vanilla GRPO, by as much as 7.2%, while OC-GRPO retains gains of +7.2% and +10.2%. The correction matters most exactly where capacity is scarcest.</p>
+
+<h2>Takeaway</h2>
+<p>However you generate guidance, solution prefixes, tiered hints, self-generated scaffolds, or a teacher model, the off-context problem comes with it, and so does the fix. The same applies to agentic RLVR, where the privileged context is a tool result or an oracle subgoal. <strong>Privileged information should decide where the model explores, not which objective you optimize. One importance ratio keeps those two jobs apart.</strong></p>
+
+<h2 id="bibtex">Citation</h2>
+<pre class="bibtex" id="bib">@article{agrawal2026off,
+  title={Off-Context GRPO: Learning to Reason on Hard Problems
+         using Privileged Information},
+  author={Agrawal, Priyank and Samanta, Ankur and Ghasemlou, Shervin
+          and Vidolov, Boris and Bhandari, Jalaj and Asadi, Kavosh
+          and Jiang, Daniel and Modi, Aditya},
+  journal={arXiv preprint arXiv:2607.19313},
+  year={2026}
+}</pre>
+<button class="copybtn" id="copybib">Copy BibTeX</button>
+
+<footer>
+  <p>Correspondence: Priyank Agrawal &lt;pa2608@columbia.edu&gt;. Work done at Meta AI.
+  The <a href="https://github.com/AgPriyank/OC-GRPO">repository</a> ships the exact training data, per-run configs, and the patched veRL fork behind every number above.</p>
+</footer>
+
+</article>
+</main>
+<script>
+document.getElementById('copybib').addEventListener('click', function () {
+  var btn = this;
+  try {
+    navigator.clipboard.writeText(document.getElementById('bib').textContent).then(function () {
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = 'Copy BibTeX'; }, 1600);
+    });
+  } catch (e) { btn.textContent = 'Select and copy manually'; }
+});
+</script>
+</body>
+</html>
