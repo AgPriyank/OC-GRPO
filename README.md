@@ -5,6 +5,8 @@ Reference implementation and reproduction package for the paper:
 > **Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information**
 > Priyank Agrawal, Ankur Samanta, Shervin Ghasemlou, Boris Vidolov, Jalaj Bhandari, Kavosh Asadi, Daniel Jiang, Aditya Modi.
 
+**Project page:** https://agpriyank.github.io/OC-GRPO/ &nbsp;|&nbsp; **Paper:** https://arxiv.org/abs/2607.19313
+
 Typical RLVR training receives zero learning signal on problems the model never
 solves (the *learning cliff*). OC-GRPO breaks the cliff by sampling rollouts
 under a **guided prompt** (a solution prefix or hint) while applying a
@@ -185,7 +187,7 @@ If you like this work and find it useful, please consider citing it:
 ```bibtex
 @article{agrawal2026off,
   title={Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information},
-  author={Agrawal, Priyank and Samanta, Ankur and Ghasemlou, Shervin and Bhandari, Jalaj and Asadi, Kavosh and Jiang, Daniel and Modi, Aditya},
+  author={Agrawal, Priyank and Samanta, Ankur and Ghasemlou, Shervin and Vidolov, Boris and Bhandari, Jalaj and Asadi, Kavosh and Jiang, Daniel and Modi, Aditya},
   journal={arXiv preprint arXiv:2607.19313},
   year={2026}
 }
