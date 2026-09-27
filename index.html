@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Off-Context GRPO</title>
-<meta name="description" content="OC-GRPO breaks the RLVR learning cliff with privileged guidance, then corrects the update with one importance ratio so training still optimizes the objective you deploy.">
+<meta name="description" content="RLVR is only as good as its rollouts. OC-GRPO uses privileged training-time information to improve rollout quality, then corrects the resulting off-context bias with a per-token importance ratio.">
 <meta property="og:title" content="Off-Context GRPO">
-<meta property="og:description" content="Learning to reason on hard problems using privileged information: guidance decides where the model explores, an importance ratio keeps the objective honest.">
+<meta property="og:description" content="Learning to reason on hard problems using privileged information: richer rollouts at training time, an unbiased objective at inference time.">
 <meta property="og:image" content="https://agpriyank.github.io/OC-GRPO/assets/fig1_schematic.png">
 <meta property="og:url" content="https://agpriyank.github.io/OC-GRPO/">
 <meta name="twitter:card" content="summary_large_image">
@@ -120,7 +120,7 @@ footer a { color:inherit; }
 <header class="masthead">
   <p class="venue">arXiv preprint &middot; 2026</p>
   <h1>Off-Context GRPO: Learning to Reason on Hard Problems using Privileged Information</h1>
-  <p class="subtitle">Guidance decides where the model explores. One importance ratio keeps the objective honest.</p>
+  <p class="subtitle">When training has information that inference does not, one importance correction keeps the objective honest.</p>
   <p class="authors">
     Priyank Agrawal<sup>1,2,*</sup>, Ankur Samanta<sup>1,2</sup>, Shervin Ghasemlou<sup>1</sup>,
     Boris Vidolov<sup>1</sup>, Jalaj Bhandari<sup>1</sup>, Kavosh Asadi<sup>1,&dagger;</sup>,
@@ -142,23 +142,24 @@ footer a { color:inherit; }
 
 <article>
 
-<h2>The learning cliff</h2>
-<p>Reinforcement learning with verifiable rewards improves LLM reasoning only on problems the model already solves at least occasionally. GRPO learns from within-group reward variance: some rollouts succeed, others fail, and the successful ones are reinforced relative to the failures. On a problem where <em>every</em> rollout fails, rewards are uniformly zero, the group-relative advantage is zero, and the gradient is exactly zero, no matter how long training continues. The training loop keeps resampling those problems epoch after epoch, spending GPU hours to learn nothing. We call this the <strong>learning cliff</strong>.</p>
+<h2>RLVR is only as good as its rollouts</h2>
+<p>Reinforcement learning with verifiable rewards depends entirely on the quality of the rollouts it trains on. GRPO learns from within-group reward variance: some trajectories in a group succeed, others fail, and the successful ones are reinforced relative to the failures. For a given base model, hard problems tend to produce groups where <em>every</em> trajectory fails. Rewards are then uniformly zero, the group-relative advantages are zero, and the gradient signal is exactly zero, no matter how long training continues. We call this the <strong>learning cliff</strong>.</p>
+<p>We construct the sharpest version of the setting: from MATH Levels 3-5 we keep the 595 problems on which Qwen2.5-7B-Instruct fails all 64 sampled attempts, so vanilla GRPO receives no learning signal at all by construction.</p>
 
-<h2>Privileged information breaks the cliff</h2>
-<p>A tested workaround is <strong>privileged information</strong>: auxiliary context, available during training but not at deployment, added to the prompt so that correct continuations become reachable. We construct the sharpest version of the setting: from MATH Levels 3-5 we keep the 595 problems on which Qwen2.5-7B-Instruct fails all 64 sampled attempts, so vanilla GRPO receives no learning signal at all by construction. Prepending a prefix of the reference solution lifts the expected verifier reward on this pool from 0.09 to 0.79.</p>
+<h2>Privileged information improves rollout quality</h2>
+<p>A natural workaround is to inject additional information into the training prompt so that correct continuations become reachable. Prepending a prefix of the reference solution lifts the expected verifier reward on this pool from 0.09 to 0.79. The cliff is breakable.</p>
 
 <figure class="wide">
   <img src="assets/prefix_cascade.png" alt="Stacked bar chart. With no guidance, 0% of the 595 hard problems are solved. Solution prefixes of increasing length unlock 9.1%, 22.4%, 35.8%, 53.8%, and 79.0% of the pool.">
-  <figcaption><b>The cliff is breakable.</b> Fraction of the 595 hard problems unlocked under the base model as the solution-prefix guidance grows from none to the full reference solution.</figcaption>
+  <figcaption><b>Richer context, better rollouts.</b> Fraction of the 595 hard problems unlocked under the base model as the solution-prefix guidance grows from none to the full reference solution.</figcaption>
 </figure>
 
-<h2>But guided rollouts are off-context</h2>
-<p>Here is the subtle part. Guided methods sample rollouts under the guided prompt and then compute the policy-gradient update as if sampling and evaluation distributions matched. The PPO-style ratio carries the guided prompt in both numerator and denominator, so the update optimizes a <em>guided</em> objective, while deployment serves the original prompt with no guidance in sight. We call this mismatch the <strong>off-context problem</strong>. Masking the guidance tokens out of the loss does not fix it: masking changes which tokens receive gradient, not what they condition on.</p>
-<p>The mismatch is not cosmetic. Training on guided rollouts without correction biases the gradient, and we show the bias can accumulate: gradient norms spike, the log-probability gap between the guided and unguided contexts widens, and in some runs the reward collapses outright mid-training.</p>
+<h2>But those rollouts are off-context</h2>
+<p>Here is the subtle part. Tokens produced under the richer context follow a different distribution than the policy under the original prompt. They are <strong>off-context</strong>. Guided methods sample rollouts under the guided prompt and then compute the update as if the sampling and evaluation distributions matched, carrying the guided prompt in both the numerator and the denominator of the policy ratio.</p>
+<p>The consequence is that training makes the model better at a <em>shifted</em> objective: the one that solves the problem with privileged information available. That is not the objective served at inference, where no guidance exists, so performance on the original objective is limited. Masking the guidance tokens out of the loss does not fix it either, because masking changes which tokens receive gradient, not what they condition on.</p>
 
-<h2>One ratio fixes it</h2>
-<p>OC-GRPO removes the bias with a textbook idea: importance sampling, the standard correction for estimating under one distribution while sampling from another. Replace the probability ratio in the GRPO objective with one whose numerator conditions on the original prompt and whose denominator conditions on the guided prompt that actually produced the token:</p>
+<h2>OC-GRPO corrects the bias</h2>
+<p>OC-GRPO targets settings with a natural <strong>information asymmetry</strong>: training time has privileged information that improves rollout quality, test time does not. It is a one-line change to a GRPO implementation. We correct the bias from off-context rollouts with a designed per-token importance correction in the log-probability ratio of the GRPO objective, replacing the standard ratio with one whose numerator conditions on the original prompt and whose denominator conditions on the guided prompt that actually produced the token:</p>
 
 <div class="eq-panel">
   <span class="eq">
@@ -171,11 +172,11 @@ footer a { color:inherit; }
   <p class="eq-note">x is the original prompt, g(x) the guided prompt. With no guidance, g(x) = x and the update is exactly vanilla GRPO.</p>
 </div>
 
-<p>The corrected estimator is unbiased for the unguided objective, and the variance of the correction scales with the length of the guidance rather than the rollout, which yields a clean operating rule: use the shortest guidance that breaks the cliff. In practice it is a one-line change to GRPO. No reward shaping, no entropy control, no auxiliary SFT loss. The overhead is a single no-grad forward pass per step, about 5.5% of step time at 7B, and nothing at inference.</p>
+<p>The corrected estimator is unbiased for the original, unguided objective. There is no reward shaping, no entropy control, and no auxiliary SFT loss. The overhead is a single no-grad forward pass per step, about 5.5% of step time at 7B, and nothing at inference. The variance of the correction scales with the length of the guidance rather than the rollout, which gives a clean operating rule: use the shortest guidance that breaks the cliff.</p>
 
-<h2>The ratio assigns credit by behavior</h2>
-<p>The correction is more than bookkeeping. We prove that, averaged over successful guided rollouts, the correction factor equals p(x)/q(x) &lt; 1, and over failed ones (1&minus;p(x))/(1&minus;q(x)) &gt; 1, where p and q are the success rates under the original and guided prompts.</p>
-<div class="callout"><p>A success that leaned on the hint is discounted in proportion to how much it leaned. A failure that persists despite the hint draws an amplified penalty. The update reinforces solving rather than hint-following, with no extra design choices.</p></div>
+<h2>Credit in proportion to unguided ability</h2>
+<p>The same correction turns out to do something more interesting than fixing the objective. We prove it induces <strong>behavior-aware credit assignment</strong>: the model receives credit in proportion to its propensity to solve the hard problem <em>without</em> the guidance. Averaged over successful guided rollouts the correction factor equals p(x)/q(x) &lt; 1, and over failed ones (1&minus;p(x))/(1&minus;q(x)) &gt; 1, where p and q are the success rates under the original and guided prompts.</p>
+<div class="callout"><p>A success that leaned on the guidance is discounted in proportion to how much it leaned. A failure that persists despite the guidance draws an amplified penalty. The update reinforces solving rather than hint-following, with no additional design choices.</p></div>
 
 <h2>Results</h2>
 <p>On Qwen2.5-7B-Instruct (LoRA, veRL, 4 epochs, 16 rollouts per prompt, 3 seeds), evaluated on AIME (1983-2026), Gaokao2023 and OmniMath: OC-GRPO reaches <strong>31.1 average Pass@1 against 27.3 for vanilla GRPO, a 13.7% relative gain</strong>, ahead of every guided baseline under an identical protocol. Pass@16 rises as well, from 49.6 to 51.4 on the held-out benchmarks and from 7.0 to 14.8 on the hard training pool, so the gains do not come from collapsing the model's sampling diversity.</p>
@@ -185,10 +186,10 @@ footer a { color:inherit; }
   <figcaption><b>Main results.</b> Seed-averaged Pass@1 and Pass@16 with relative gains over vanilla GRPO. OC-GRPO-Fixed selects a per-problem guidance level once before training; OC-GRPO-Adaptive re-selects it during training.</figcaption>
 </figure>
 
-<p>The pattern sharpens at smaller scale. Guided methods without the correction rely on <em>back-generalization</em>, the hope that improvement under the guided prompt transfers to the unguided one. At 7B a large model absorbs much of the mismatch. At 3B and 1.5B it does not: uncorrected guided baselines fall below vanilla GRPO, by as much as 7.2%, while OC-GRPO retains gains of +7.2% and +10.2%. The correction matters most exactly where capacity is scarcest.</p>
+<p>The pattern sharpens at smaller scale. Guided methods without the correction rely on the hope that improvement under the guided prompt transfers to the unguided one. At 7B a large model absorbs much of the mismatch; at 3B and 1.5B it does not. Uncorrected guided baselines fall below vanilla GRPO, by as much as 7.2%, while OC-GRPO retains gains of +7.2% and +10.2%. The correction matters most exactly where capacity is scarcest.</p>
 
 <h2>Takeaway</h2>
-<p>However you generate guidance, solution prefixes, tiered hints, self-generated scaffolds, or a teacher model, the off-context problem comes with it, and so does the fix. The same applies to agentic RLVR, where the privileged context is a tool result or an oracle subgoal. <strong>Privileged information should decide where the model explores, not which objective you optimize. One importance ratio keeps those two jobs apart.</strong></p>
+<p>Privileged information helps roll out richer trajectories. OC-GRPO provides the robust optimization objective that corrects the bias that privileged information introduces. The recipe applies however the guidance is generated, whether solution prefixes, tiered hints, self-generated scaffolds, or a teacher model, and extends naturally to agentic RLVR, where the privileged context is a tool result or an oracle subgoal.</p>
 
 <h2 id="bibtex">Citation</h2>
 <pre class="bibtex" id="bib">@article{agrawal2026off,
